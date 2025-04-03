@@ -1,0 +1,10 @@
+{
+    "mcpServers": {
+        "weather": {
+            "args": [
+                "/Users/ani/Desktop/weather/build/index.js"
+            ],
+            "env": {}
+        }
+    }
+}

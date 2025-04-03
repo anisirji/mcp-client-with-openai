@@ -1,0 +1,1182 @@
+// MCP Client with single server
+
+// #!/usr/bin/env node
+// import OpenAI from "openai";
+// import {
+//   ChatCompletionTool,
+//   ChatCompletionMessageParam,
+// } from "openai/resources/chat/completions";
+// import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+// import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// import readline from "readline/promises";
+// import dotenv from "dotenv";
+
+// // Load environment variables
+// dotenv.config();
+
+// // Check for API key
+// const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// if (!OPENAI_API_KEY) {
+//   throw new Error("OPENAI_API_KEY is not set in .env file");
+// }
+
+// /**
+//  * MCP Client implementation using OpenAI
+//  */
+// class MCPClient {
+//   private mcp: Client;
+//   private openai: OpenAI;
+//   private transport: StdioClientTransport | null = null;
+//   private tools: ChatCompletionTool[] = [];
+
+//   constructor() {
+//     // Initialize OpenAI client
+//     this.openai = new OpenAI({
+//       apiKey: OPENAI_API_KEY,
+//     });
+
+//     // Initialize MCP client
+//     this.mcp = new Client({ name: "mcp-client-cli", version: "1.0.0" });
+//   }
+
+//   /**
+//    * Connect to an MCP server
+//    * @param serverScriptPath Path to the server script
+//    */
+//   async connectToServer(serverScriptPath: string) {
+//     try {
+//       // Determine server type (js or py)
+//       const isJs = serverScriptPath.endsWith(".js");
+//       const isPy = serverScriptPath.endsWith(".py");
+//       if (!isJs && !isPy) {
+//         throw new Error("Server script must be a .js or .py file");
+//       }
+
+//       // Set command based on server type and platform
+//       const command = isPy
+//         ? process.platform === "win32"
+//           ? "python"
+//           : "python3"
+//         : process.execPath;
+
+//       // Initialize transport and connect
+//       this.transport = new StdioClientTransport({
+//         command,
+//         args: [serverScriptPath],
+//       });
+
+//       this.mcp.connect(this.transport);
+
+//       // Get list of available tools
+//       const toolsResult = await this.mcp.listTools();
+
+//       // Convert MCP tools to OpenAI format
+//       this.tools = toolsResult.tools.map((tool) => {
+//         return {
+//           type: "function",
+//           function: {
+//             name: tool.name,
+//             description: tool.description,
+//             parameters: tool.inputSchema,
+//           },
+//         };
+//       });
+
+//       console.log(
+//         "Connected to server with tools:",
+//         this.tools.map((tool) => tool.function.name)
+//       );
+//     } catch (e) {
+//       console.log("Failed to connect to MCP server: ", e);
+//       throw e;
+//     }
+//   }
+
+//   /**
+//    * Process a user query using OpenAI and MCP tools
+//    * @param query User query text
+//    * @returns Response text
+//    */
+//   async processQuery(query: string) {
+//     // Initialize messages array with user query
+//     const messages: ChatCompletionMessageParam[] = [
+//       {
+//         role: "user",
+//         content: query,
+//       },
+//     ];
+
+//     // Get initial response from OpenAI
+//     const response = await this.openai.chat.completions.create({
+//       model: "gpt-4o-mini", // Use your preferred OpenAI model
+//       messages,
+//       tools: this.tools,
+//       max_tokens: 1000,
+//     });
+
+//     const finalText = [];
+//     const responseMessage = response.choices[0].message;
+
+//     // Add text response if available
+//     if (responseMessage.content) {
+//       finalText.push(responseMessage.content);
+//     }
+
+//     // Process tool calls if any
+//     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
+//       // Add assistant message with tool calls
+//       messages.push({
+//         role: "assistant",
+//         content: responseMessage.content,
+//         tool_calls: responseMessage.tool_calls,
+//       });
+
+//       // Process each tool call
+//       for (const toolCall of responseMessage.tool_calls) {
+//         const toolName = toolCall.function.name;
+//         let toolArgs: Record<string, unknown>;
+
+//         try {
+//           toolArgs = JSON.parse(toolCall.function.arguments);
+//         } catch (e) {
+//           console.error(`Error parsing tool arguments: ${e}`);
+//           continue;
+//         }
+
+//         finalText.push(
+//           `[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`
+//         );
+
+//         try {
+//           // Call the MCP tool and get results
+//           const result = await this.mcp.callTool({
+//             name: toolName,
+//             arguments: toolArgs,
+//           });
+
+//           // Add the tool result to messages
+//           messages.push({
+//             role: "tool",
+//             tool_call_id: toolCall.id,
+//             content: JSON.stringify(result.content),
+//           });
+//         } catch (e) {
+//           console.error(`Error calling tool ${toolName}: ${e}`);
+//           messages.push({
+//             role: "tool",
+//             tool_call_id: toolCall.id,
+//             content: JSON.stringify({ error: `Failed to execute tool: ${e}` }),
+//           });
+//         }
+//       }
+
+//       // Get a new response with the tool results
+//       try {
+//         const newResponse = await this.openai.chat.completions.create({
+//           model: "gpt-4-turbo",
+//           messages,
+//           max_tokens: 1000,
+//         });
+
+//         finalText.push(newResponse.choices[0].message.content || "");
+//       } catch (e) {
+//         console.error(`Error getting final response: ${e}`);
+//         finalText.push(`Error processing tool results: ${e}`);
+//       }
+//     }
+
+//     return finalText.join("\n");
+//   }
+
+//   /**
+//    * Start an interactive chat loop
+//    */
+//   async chatLoop() {
+//     const rl = readline.createInterface({
+//       input: process.stdin,
+//       output: process.stdout,
+//     });
+
+//     try {
+//       console.log("\nMCP Client Started!");
+//       console.log("Type your queries or 'quit' to exit.");
+
+//       while (true) {
+//         const message = await rl.question("\nQuery: ");
+//         if (message.toLowerCase() === "quit") {
+//           break;
+//         }
+
+//         console.log("Processing your query...");
+//         const response = await this.processQuery(message);
+//         console.log("\n" + response);
+//       }
+//     } finally {
+//       rl.close();
+//     }
+//   }
+
+//   /**
+//    * Clean up resources
+//    */
+//   async cleanup() {
+//     if (this.mcp) {
+//       await this.mcp.close();
+//     }
+//   }
+// }
+
+// /**
+//  * Main entry point
+//  */
+// async function main() {
+//   if (process.argv.length < 3) {
+//     console.log("Usage: node build/index.js <path_to_server_script>");
+//     return;
+//   }
+
+//   const mcpClient = new MCPClient();
+
+//   try {
+//     await mcpClient.connectToServer(process.argv[2]);
+//     await mcpClient.chatLoop();
+//   } catch (e) {
+//     console.error("Fatal error:", e);
+//   } finally {
+//     await mcpClient.cleanup();
+//     process.exit(0);
+//   }
+// }
+
+// // Run the main function
+// main();
+
+// MCP Client with multiple servers
+
+// import express, { Request, Response } from "express";
+// import OpenAI from "openai";
+// import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+// import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// import dotenv from "dotenv";
+// import path from "path";
+// import fs from "fs";
+// import {
+//   ChatCompletionMessageParam,
+//   ChatCompletionTool,
+// } from "openai/resources/chat/completions";
+
+// dotenv.config();
+
+// const OPENAI_API_KEY: string | undefined = process.env.OPENAI_API_KEY;
+// if (!OPENAI_API_KEY) {
+//   throw new Error("OPENAI_API_KEY is not set in .env file");
+// }
+
+// const app = express();
+// const PORT: number = Number(process.env.PORT) || 3000;
+
+// app.use(express.json());
+// import { fileURLToPath } from "url";
+// import { dirname } from "path";
+
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = dirname(__filename);
+
+// app.use(express.static(path.join(__dirname, "public")));
+
+// // Load MCP server configurations from JSON file
+// const configPath = path.join(__dirname, "mcp-config.json");
+// if (!fs.existsSync(configPath)) {
+//   console.error(`⚠️  Config file not found: ${configPath}`);
+//   process.exit(1);
+// }
+// const mcpServers = JSON.parse(fs.readFileSync(configPath, "utf-8")).mcpServers;
+
+// class MCPClient {
+//   private mcpInstances: Record<string, Client> = {};
+//   private openai: OpenAI;
+//   private tools: Record<string, ChatCompletionTool[]> = {};
+
+//   constructor() {
+//     this.openai = new OpenAI({ apiKey: OPENAI_API_KEY! });
+//   }
+
+//   async connectToServers(): Promise<void> {
+//     for (const [serverName, serverConfig] of Object.entries(mcpServers) as [
+//       string,
+//       { args: string[]; env?: NodeJS.ProcessEnv }
+//     ][]) {
+//       console.log(`🟢 Starting MCP server: ${serverName}`);
+//       console.log(`🔹 Args: ${serverConfig.args.join(" ")}`);
+
+//       try {
+//         const transport = new StdioClientTransport({
+//           command: "/Users/ani/.nvm/versions/node/v23.3.0/bin/node",
+//           args: serverConfig.args,
+//           env: serverConfig.env
+//             ? Object.fromEntries(
+//                 Object.entries(serverConfig.env).filter(
+//                   ([_, value]) => value !== undefined
+//                 ) as [string, string][]
+//               )
+//             : undefined,
+//         });
+
+//         const mcpInstance = new Client({ name: serverName, version: "1.0.0" });
+//         mcpInstance.connect(transport);
+//         this.mcpInstances[serverName] = mcpInstance;
+
+//         const toolsResult = await mcpInstance.listTools();
+//         this.tools[serverName] = toolsResult.tools.map((tool) => ({
+//           type: "function",
+//           function: {
+//             name: tool.name,
+//             description: tool.description ?? "",
+//             parameters: tool.inputSchema,
+//           },
+//         }));
+//         console.log(
+//           `✅ Connected to MCP server: ${serverName} with tools:`,
+//           this.tools[serverName].map((tool) => tool.function.name)
+//         );
+//       } catch (e) {
+//         console.error(`❌ Failed to connect to MCP server (${serverName}):`, e);
+//       }
+//     }
+//   }
+
+//   async processQuery(query: string): Promise<string> {
+//     const messages: ChatCompletionMessageParam[] = [
+//       { role: "user", content: query },
+//     ];
+//     const availableTools = Object.values(this.tools).flat();
+//     const response = await this.openai.chat.completions.create({
+//       model: "gpt-4o-mini",
+//       messages,
+//       tools: availableTools,
+//       max_tokens: 1000,
+//     });
+
+//     const finalText: string[] = [];
+//     const toolCallsText: string[] = [];
+//     const responseMessage = response.choices[0].message;
+
+//     if (responseMessage.content) {
+//       finalText.push(
+//         `<span class='final-message'>${responseMessage.content.replace(
+//           /\n/g,
+//           "<br>"
+//         )}</span>`
+//       );
+//     }
+
+//     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
+//       messages.push({
+//         role: "assistant",
+//         content: responseMessage.content ?? "",
+//         tool_calls: responseMessage.tool_calls,
+//       });
+
+//       for (const toolCall of responseMessage.tool_calls) {
+//         const toolName = toolCall.function.name;
+//         let toolArgs: Record<string, unknown>;
+//         try {
+//           toolArgs = JSON.parse(toolCall.function.arguments);
+//         } catch (e) {
+//           console.error(`Error parsing tool arguments: ${e}`);
+//           continue;
+//         }
+//         toolCallsText.push(
+//           `<span class='tool-message'>🛠 Calling tool: <strong>${toolName}</strong> with args: ${JSON.stringify(
+//             toolArgs
+//           )}</span>`
+//         );
+
+//         let executed = false;
+//         for (const [serverName, mcpInstance] of Object.entries(
+//           this.mcpInstances
+//         )) {
+//           try {
+//             const result = await mcpInstance.callTool({
+//               name: toolName,
+//               arguments: toolArgs,
+//             });
+//             const toolResult = JSON.parse(JSON.stringify(result.content));
+
+//             messages.push({
+//               role: "tool",
+//               tool_call_id: toolCall.id,
+//               content: JSON.stringify(toolResult),
+//             });
+
+//             if (
+//               Array.isArray(toolResult) &&
+//               toolResult.length > 0 &&
+//               toolResult[0].type === "text"
+//             ) {
+//               finalText.push(
+//                 `<span class='tool-result'>${toolResult[0].text.replace(
+//                   /\n/g,
+//                   "<br>"
+//                 )}</span>`
+//               );
+//             } else {
+//               finalText.push(
+//                 `<span class='tool-result'>✅ Tool <strong>${toolName}</strong> result: ${JSON.stringify(
+//                   toolResult
+//                 )}</span>`
+//               );
+//             }
+//             executed = true;
+//             break;
+//           } catch (e) {
+//             console.error(
+//               `Error calling tool ${toolName} on ${serverName}: ${e}`
+//             );
+//           }
+//         }
+//         if (!executed) {
+//           finalText.push(
+//             `<span class='tool-error'>❌ Error calling tool <strong>${toolName}</strong>: Tool not available in any connected MCP server</span>`
+//           );
+//         }
+//       }
+//     }
+//     return toolCallsText.join("<br>") + "<br><br>" + finalText.join("<br>");
+//   }
+// }
+
+// const mcpClient = new MCPClient();
+
+// app.get("/", (req: Request, res: Response): void => {
+//   res.sendFile(path.join(__dirname, "public", "index.html"));
+// });
+
+// app.post("/chat", async (req: Request, res: Response): Promise<void> => {
+//   const { query } = req.body as { query: string };
+//   if (!query) {
+//     res.status(400).json({ error: "Query is required" });
+//     return;
+//   }
+//   try {
+//     console.log("Processing query:", query);
+//     const response = await mcpClient.processQuery(query);
+//     res.json({ response });
+//   } catch (error) {
+//     console.error("Error processing query:", error);
+//     res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
+
+// app.listen(PORT, async (): Promise<void> => {
+//   console.log(`Server running on http://localhost:${PORT}`);
+//   await mcpClient.connectToServers();
+// });
+
+// Does Reasoning but not able to demonstrate
+// import express, { Request, Response } from "express";
+// import OpenAI from "openai";
+// import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+// import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// import dotenv from "dotenv";
+// import path from "path";
+// import fs from "fs";
+// import {
+//   ChatCompletionMessageParam,
+//   ChatCompletionTool,
+// } from "openai/resources/chat/completions";
+// import { fileURLToPath } from "url";
+// import { dirname } from "path";
+
+// dotenv.config();
+
+// const OPENAI_API_KEY: string | undefined = process.env.OPENAI_API_KEY;
+// if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not set in .env file");
+
+// const app = express();
+// const PORT: number = Number(process.env.PORT) || 3000;
+
+// app.use(express.json());
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = dirname(__filename);
+// app.use(express.static(path.join(__dirname, "public")));
+
+// const configPath = path.join(__dirname, "mcp-config.json");
+// if (!fs.existsSync(configPath))
+//   throw new Error(`Config file not found: ${configPath}`);
+// const mcpServers = JSON.parse(fs.readFileSync(configPath, "utf-8")).mcpServers;
+
+// // In-memory store for chat histories (simple implementation)
+// // For production, consider using a database
+// interface ChatSession {
+//   messages: ChatCompletionMessageParam[];
+//   lastActivity: number;
+// }
+
+// class MCPClient {
+//   private mcpInstances: Record<string, Client> = {};
+//   private openai: OpenAI;
+//   private tools: Record<string, ChatCompletionTool[]> = {};
+
+//   // Change from private to public so it can be accessed outside the class
+//   public chatSessions: Map<string, ChatSession> = new Map();
+
+//   constructor() {
+//     this.openai = new OpenAI({ apiKey: OPENAI_API_KEY! });
+
+//     // Start a session cleanup job (remove inactive sessions after 30 minutes)
+//     setInterval(() => this.cleanupSessions(30 * 60 * 1000), 5 * 60 * 1000);
+//   }
+
+//   private cleanupSessions(maxAge: number): void {
+//     const now = Date.now();
+//     for (const [sessionId, session] of this.chatSessions.entries()) {
+//       if (now - session.lastActivity > maxAge) {
+//         this.chatSessions.delete(sessionId);
+//         console.log(`Cleaned up inactive session: ${sessionId}`);
+//       }
+//     }
+//   }
+
+//   async connectToServers(): Promise<void> {
+//     for (const [serverName, serverConfig] of Object.entries(mcpServers) as [
+//       string,
+//       { args: string[]; env?: NodeJS.ProcessEnv }
+//     ][]) {
+//       try {
+//         const transport = new StdioClientTransport({
+//           command: process.execPath,
+//           args: serverConfig.args,
+//           env: serverConfig.env
+//             ? Object.fromEntries(
+//                 Object.entries(serverConfig.env).filter(
+//                   ([, value]) => value !== undefined
+//                 ) as [string, string][]
+//               )
+//             : undefined,
+//         });
+
+//         const mcpInstance = new Client({ name: serverName, version: "1.0.0" });
+//         mcpInstance.connect(transport);
+//         this.mcpInstances[serverName] = mcpInstance;
+
+//         const toolsResult = await mcpInstance.listTools();
+//         this.tools[serverName] = toolsResult.tools.map((tool) => ({
+//           type: "function",
+//           function: {
+//             name: tool.name,
+//             description: tool.description ?? "",
+//             parameters: tool.inputSchema,
+//           },
+//         }));
+//       } catch (e) {
+//         console.error(`Failed to connect to MCP server (${serverName}):`, e);
+//       }
+//     }
+//   }
+
+//   private getOrCreateSession(sessionId: string): ChatSession {
+//     if (!this.chatSessions.has(sessionId)) {
+//       // Initialize a new chat session with the system prompt
+//       this.chatSessions.set(sessionId, {
+//         messages: [
+//           {
+//             role: "system",
+//             content: `You are a ReAct-style reasoning agent. Always use this format:
+// Thought: <reasoning>
+// Action: <tool name + args>
+// Observation: <tool result>
+// Final Answer: <conclusion>
+// Always conclude with 'Final Answer:' if you are done. Final Answer must be there in final response.`,
+//           },
+//         ],
+//         lastActivity: Date.now(),
+//       });
+//     }
+
+//     // Update last activity timestamp
+//     const session = this.chatSessions.get(sessionId)!;
+//     session.lastActivity = Date.now();
+
+//     return session;
+//   }
+
+//   // New non-streaming query handler using ReAct and MCP
+//   async handleQuery(
+//     query: string,
+//     sessionId: string
+//   ): Promise<{
+//     finalAnswer: string;
+//     chatHistory: ChatCompletionMessageParam[];
+//   }> {
+//     const session = this.getOrCreateSession(sessionId);
+//     session.messages.push({ role: "user", content: query });
+//     const tools = Object.values(this.tools).flat();
+//     const maxSteps = 8;
+//     let finalAnswer = "";
+
+//     for (let step = 0; step < maxSteps; step++) {
+//       console.log(
+//         `[DEBUG] Step ${step} (Session ${sessionId}): Sending messages to OpenAI:\n`,
+//         JSON.stringify(session.messages, null, 2)
+//       );
+
+//       const response = await this.openai.chat.completions.create({
+//         model: "gpt-4o", // or "gpt-4o-mini", whichever you're using
+//         messages: session.messages,
+//         tools,
+//         max_tokens: 1000,
+//       });
+
+//       const resMsg = response.choices[0].message;
+//       console.log(
+//         `[DEBUG] Step ${step}: Raw response message:\n`,
+//         JSON.stringify(resMsg, null, 2)
+//       );
+
+//       if (resMsg.content) {
+//         session.messages.push({ role: "assistant", content: resMsg.content });
+
+//         // Check if it contains "Final Answer:"
+//         if (/Final Answer\s*:/i.test(resMsg.content)) {
+//           finalAnswer = resMsg.content;
+//           console.log(
+//             `[DEBUG] Step ${step}: Found "Final Answer". Ending loop.`
+//           );
+//           break;
+//         }
+//       }
+
+//       // Check for tool calls
+//       const toolCalls = (resMsg as any).tool_calls as any[];
+//       if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+//         session.messages.push({
+//           role: "assistant",
+//           content: resMsg.content || "",
+//           tool_calls: toolCalls,
+//         });
+
+//         console.log(
+//           `[DEBUG] Step ${step}: Found tool calls. Count = ${toolCalls.length}`
+//         );
+
+//         for (const toolCall of toolCalls) {
+//           const toolName = toolCall.function?.name;
+//           const args = toolCall.function?.arguments
+//             ? JSON.parse(toolCall.function.arguments)
+//             : {};
+
+//           console.log(
+//             `[DEBUG] Step ${step}: Calling tool "${toolName}" with args:`,
+//             args
+//           );
+
+//           let executed = false;
+//           for (const [serverName, mcpInstance] of Object.entries(
+//             this.mcpInstances
+//           )) {
+//             try {
+//               const result = await mcpInstance.callTool({
+//                 name: toolName,
+//                 arguments: args,
+//               });
+
+//               let toolResult: string;
+//               const content = result.content;
+//               if (Array.isArray(content) && content[0]?.type === "text") {
+//                 toolResult = content.map((c) => c.text).join("\n");
+//               } else {
+//                 toolResult =
+//                   typeof content === "string"
+//                     ? content
+//                     : JSON.stringify(content);
+//               }
+
+//               session.messages.push({
+//                 role: "tool",
+//                 tool_call_id: toolCall.id,
+//                 content: toolResult,
+//               });
+
+//               console.log(
+//                 `[DEBUG] Step ${step}: Tool "${toolName}" result: ${toolResult}`
+//               );
+//               executed = true;
+//               break;
+//             } catch (e) {
+//               console.error(
+//                 `[DEBUG] Error executing tool "${toolName}" on server "${serverName}":`,
+//                 e
+//               );
+//             }
+//           }
+
+//           if (!executed) {
+//             const failMsg = `❌ Tool ${toolName} failed.`;
+//             session.messages.push({
+//               role: "tool",
+//               tool_call_id: toolCall.id,
+//               content: JSON.stringify({ error: failMsg }),
+//             });
+//             console.error(`[DEBUG] Step ${step}: ${failMsg}`);
+//           }
+//         }
+
+//         // Continue to next step after handling tool calls
+//         continue;
+//       }
+
+//       // If no tool call executed, treat this as final answer.
+//       finalAnswer = resMsg.content || "No Answer ";
+//       break;
+//     }
+
+//     return { finalAnswer, chatHistory: session.messages };
+//   }
+
+//   // Add a method to clear a session
+//   public clearSession(sessionId: string): boolean {
+//     return this.chatSessions.delete(sessionId);
+//   }
+// }
+
+// const mcpClient = new MCPClient();
+
+// app.get("/", (req: Request, res: Response): void => {
+//   res.sendFile(path.join(__dirname, "public", "index.html"));
+// });
+
+// // Modified endpoint: no streaming; returns full result after processing.
+// app.get("/stream", async (req: Request, res: Response) => {
+//   const query = req.query.q as string;
+//   if (!query) {
+//     res.status(400).send("Missing query");
+//     return;
+//   }
+
+//   // Extract session ID from cookies or query param, or generate a new one
+//   const sessionId =
+//     (req.query.session_id as string) ||
+//     req.headers.cookie?.match(/session_id=([^;]+)/)?.[1] ||
+//     `session_${Date.now()}`;
+
+//   try {
+//     const result = await mcpClient.handleQuery(query, sessionId);
+//     res.json(result);
+//   } catch (e) {
+//     console.error("Error processing query:", e);
+//     res.status(500).json({ error: "Error processing query" });
+//   }
+// });
+
+// // Endpoint to clear a session
+// app.get("/clear-session", (req: Request, res: Response) => {
+//   const sessionId =
+//     (req.query.session_id as string) ||
+//     req.headers.cookie?.match(/session_id=([^;]+)/)?.[1];
+
+//   if (sessionId) {
+//     const success = mcpClient.clearSession(sessionId);
+//     res.json({
+//       success,
+//       message: success ? "Session cleared" : "Session not found",
+//     });
+//   } else {
+//     res.status(400).json({ success: false, message: "Invalid session ID" });
+//   }
+// });
+
+// app.listen(PORT, async (): Promise<void> => {
+//   console.log(`✅ Server running at http://localhost:${PORT}`);
+//   await mcpClient.connectToServers();
+// });
+
+
+
+
+
+//Final working consider
+
+
+// // SSE version
+// import express, { Request, Response } from "express";
+// import OpenAI from "openai";
+// import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+// import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// import dotenv from "dotenv";
+// import path from "path";
+// import fs from "fs";
+// import {
+//   ChatCompletionMessageParam,
+//   ChatCompletionTool,
+// } from "openai/resources/chat/completions";
+// import { fileURLToPath } from "url";
+// import { dirname } from "path";
+
+// dotenv.config();
+
+// const OPENAI_API_KEY: string | undefined = process.env.OPENAI_API_KEY;
+// if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not set in .env file");
+
+// const app = express();
+// const PORT: number = Number(process.env.PORT) || 3000;
+
+// app.use(express.json());
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = dirname(__filename);
+// app.use(express.static(path.join(__dirname, "public")));
+
+// const configPath = path.join(__dirname, "mcp-config.json");
+// if (!fs.existsSync(configPath))
+//   throw new Error(`Config file not found: ${configPath}`);
+// const mcpServers = JSON.parse(fs.readFileSync(configPath, "utf-8")).mcpServers;
+
+// // In-memory store for chat histories (simple implementation)
+// // For production, consider using a database
+// interface ChatSession {
+//   messages: ChatCompletionMessageParam[];
+//   lastActivity: number;
+// }
+
+// class MCPClient {
+//   private mcpInstances: Record<string, Client> = {};
+//   private openai: OpenAI;
+//   private tools: Record<string, ChatCompletionTool[]> = {};
+
+//   public chatSessions: Map<string, ChatSession> = new Map();
+
+//   constructor() {
+//     this.openai = new OpenAI({ apiKey: OPENAI_API_KEY! });
+
+//     // Start a session cleanup job (remove inactive sessions after 30 minutes)
+//     setInterval(() => this.cleanupSessions(30 * 60 * 1000), 5 * 60 * 1000);
+//   }
+
+//   private cleanupSessions(maxAge: number): void {
+//     const now = Date.now();
+//     for (const [sessionId, session] of this.chatSessions.entries()) {
+//       if (now - session.lastActivity > maxAge) {
+//         this.chatSessions.delete(sessionId);
+//         console.log(`Cleaned up inactive session: ${sessionId}`);
+//       }
+//     }
+//   }
+
+//   private getOrCreateSession(sessionId: string): ChatSession {
+//     if (!this.chatSessions.has(sessionId)) {
+//       // Dynamically generate a string listing available tools
+//       const toolDescriptions = Object.entries(this.tools)
+//         .map(([serverName, tools]) => {
+//           return tools
+//             .map(
+//               (tool) =>
+//                 `- ${tool.function.name}: ${
+//                   tool.function.description || "No description provided"
+//                 } (From server: ${serverName})`
+//             )
+//             .join("\n");
+//         })
+//         .join("\n");
+
+//       // Build the system prompt dynamically
+//       const systemPrompt = `You are a ReAct-style reasoning agent aware of your available tools. Always use the following format:
+// 1. Plan: Provide a concise, high-level plan for how you will solve the user's query.
+// 2. Thought: Then describe your detailed reasoning process.
+// 3. Action: Specify any tool to use along with its arguments (if needed).
+// 4. Observation: Record the result of the action/tool.
+// 5. Final Answer: Provide your final answer, preceded by "Final Answer:".
+
+// Important:
+// - Each step must be on its own line, labeled exactly (e.g., "Plan:", "Thought:", etc.).
+// - Always provide a "Plan:" step before "Thought:".
+// - Always include the "Plan:" step in the response.
+// - Conclude with "Final Answer:" when done.
+
+// Available tools:
+// ${toolDescriptions}`;
+
+//       this.chatSessions.set(sessionId, {
+//         messages: [
+//           {
+//             role: "system",
+//             content: systemPrompt,
+//           },
+//         ],
+//         lastActivity: Date.now(),
+//       });
+//     }
+
+//     // Update last activity timestamp
+//     const session = this.chatSessions.get(sessionId)!;
+//     session.lastActivity = Date.now();
+
+//     return session;
+//   }
+
+//   // SSE-based method for handling queries with a preliminary planning phase
+//   async handleQuerySSE(
+//     query: string,
+//     sessionId: string,
+//     res: Response
+//   ): Promise<void> {
+//     const session = this.getOrCreateSession(sessionId);
+//     session.messages.push({ role: "user", content: query });
+
+//     const tools = Object.values(this.tools).flat();
+//     const maxSteps = 10;
+//     let finalAnswer = "";
+
+//     // Set up SSE headers
+//     res.setHeader("Content-Type", "text/event-stream");
+//     res.setHeader("Cache-Control", "no-cache");
+//     res.setHeader("Connection", "keep-alive");
+
+//     // Helper function to send SSE data
+//     function sendSSE(role: string, content: string) {
+//       const data = JSON.stringify({ role, content });
+//       res.write(`data: ${data}\n\n`);
+//     }
+
+//     // Notify the frontend that the chain-of-thought is starting
+//     sendSSE("info", "Starting chain-of-thought...");
+
+//     // ---------- Preliminary Phase: Get the Plan ---------- //
+//     try {
+//       const preliminaryResponse = await this.openai.chat.completions.create({
+//         model: "gpt-4o", // or "gpt-4o-mini"
+//         messages: session.messages,
+//         max_tokens: 1000,
+//         // Do not include tools in this preliminary call
+//       });
+//       const preliminaryMsg = preliminaryResponse.choices[0].message;
+//       if (preliminaryMsg.content) {
+//         // Extract only the "Plan:" part (assuming it starts with "Plan:")
+//         const planSteps = preliminaryMsg.content
+//           .split(/\n(?=Plan:)/)
+//           .map((s) => s.trim())
+//           .filter(Boolean);
+//         if (planSteps.length > 0) {
+//           const planStep = planSteps[0];
+//           session.messages.push({ role: "assistant", content: planStep });
+//           sendSSE("assistant", planStep);
+//         }
+//       }
+//     } catch (err) {
+//       console.error("Error in preliminary planning phase:", err);
+//       sendSSE("error", "Error in planning phase");
+//       res.end();
+//       return;
+//     }
+//     // ------------------------------------------------------- //
+
+//     // ---------- Iterative ReAct Loop with Tools ---------- //
+//     for (let step = 0; step < maxSteps; step++) {
+//       console.log(
+//         `[DEBUG] Step ${step} (Session ${sessionId}): Sending messages to OpenAI:\n`,
+//         JSON.stringify(session.messages, null, 2)
+//       );
+
+//       // Now, send a request with tools enabled
+//       const response = await this.openai.chat.completions.create({
+//         model: "gpt-4o", // or "gpt-4o-mini"
+//         messages: session.messages,
+//         tools,
+//         max_tokens: 1000,
+//       });
+
+//       const resMsg = response.choices[0].message;
+//       console.log("[DEBUG] Raw response from OpenAI:\n", resMsg);
+
+//       if (resMsg.content) {
+//         // Parse the response into steps (including Thought, Action, etc.)
+//         const steps = resMsg.content
+//           .split(/\n(?=Plan:|Thought:|Action:|Observation:|Final Answer:)/)
+//           .map((s) => s.trim())
+//           .filter(Boolean);
+
+//         let foundFinal = false;
+//         for (const stepContent of steps) {
+//           session.messages.push({ role: "assistant", content: stepContent });
+//           sendSSE("assistant", stepContent);
+//           if (/^Final Answer\s*:/i.test(stepContent)) {
+//             finalAnswer = stepContent;
+//             foundFinal = true;
+//             break;
+//           }
+//         }
+//         if (foundFinal) break;
+//       }
+
+//       // Handle any tool calls, if present
+//       const toolCalls = (resMsg as any).tool_calls as any[];
+//       if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+//         session.messages.push({
+//           role: "assistant",
+//           content: resMsg.content || "",
+//           tool_calls: toolCalls,
+//         });
+
+//         for (const toolCall of toolCalls) {
+//           const toolName = toolCall.function?.name;
+//           const args = toolCall.function?.arguments
+//             ? JSON.parse(toolCall.function.arguments)
+//             : {};
+
+//           console.log(`[DEBUG] Calling tool "${toolName}" with args:`, args);
+
+//           let executed = false;
+//           for (const [serverName, mcpInstance] of Object.entries(
+//             this.mcpInstances
+//           )) {
+//             try {
+//               const result = await mcpInstance.callTool({
+//                 name: toolName,
+//                 arguments: args,
+//               });
+
+//               let toolResult: string;
+//               const content = result.content;
+//               if (Array.isArray(content) && content[0]?.type === "text") {
+//                 toolResult = content.map((c) => c.text).join("\n");
+//               } else {
+//                 toolResult =
+//                   typeof content === "string"
+//                     ? content
+//                     : JSON.stringify(content);
+//               }
+
+//               session.messages.push({
+//                 role: "tool",
+//                 tool_call_id: toolCall.id,
+//                 content: toolResult,
+//               });
+//               sendSSE("assistant", `Observation: ${toolResult}`);
+//               console.log(`[DEBUG] Tool "${toolName}" result: ${toolResult}`);
+//               executed = true;
+//               break;
+//             } catch (err) {
+//               console.error(
+//                 `[DEBUG] Error executing tool "${toolName}" on server "${serverName}":`,
+//                 err
+//               );
+//             }
+//           }
+
+//           if (!executed) {
+//             const failMsg = `❌ Tool ${toolName} failed.`;
+//             session.messages.push({
+//               role: "tool",
+//               tool_call_id: toolCall.id,
+//               content: JSON.stringify({ error: failMsg }),
+//             });
+//             sendSSE("assistant", `Observation: ${failMsg}`);
+//             console.error(`[DEBUG] ${failMsg}`);
+//           }
+//         }
+//         continue;
+//       }
+
+//       if (!finalAnswer) {
+//         finalAnswer = resMsg.content || "No Answer";
+//       }
+//       break;
+//     }
+//     // ------------------------------------------------------- //
+
+//     sendSSE("info", "Done");
+//     res.end();
+//   }
+
+//   // Connect to all configured MCP servers
+//   async connectToServers(): Promise<void> {
+//     for (const [serverName, serverConfig] of Object.entries(mcpServers) as [
+//       string,
+//       { args: string[]; env?: NodeJS.ProcessEnv }
+//     ][]) {
+//       try {
+//         const transport = new StdioClientTransport({
+//           command: process.execPath,
+//           args: serverConfig.args,
+//           env: serverConfig.env
+//             ? Object.fromEntries(
+//                 Object.entries(serverConfig.env).filter(
+//                   ([, value]) => value !== undefined
+//                 ) as [string, string][]
+//               )
+//             : undefined,
+//         });
+
+//         const mcpInstance = new Client({ name: serverName, version: "1.0.0" });
+//         mcpInstance.connect(transport);
+//         this.mcpInstances[serverName] = mcpInstance;
+
+//         const toolsResult = await mcpInstance.listTools();
+//         this.tools[serverName] = toolsResult.tools.map((tool) => ({
+//           type: "function",
+//           function: {
+//             name: tool.name,
+//             description: tool.description ?? "",
+//             parameters: tool.inputSchema,
+//           },
+//         }));
+//       } catch (e) {
+//         console.error(`Failed to connect to MCP server (${serverName}):`, e);
+//       }
+//     }
+//   }
+
+//   // Optionally clear a session
+//   public clearSession(sessionId: string): boolean {
+//     return this.chatSessions.delete(sessionId);
+//   }
+// }
+
+// const mcpClient = new MCPClient();
+
+// app.get("/", (req: Request, res: Response) => {
+//   res.sendFile(path.join(__dirname, "public", "index.html"));
+// });
+
+// app.get("/stream-sse", async (req: Request, res: Response) => {
+//   const query = req.query.q as string;
+//   if (!query) {
+//     res.status(400).send("Missing query");
+//     return;
+//   }
+
+//   const sessionId =
+//     (req.query.session_id as string) ||
+//     req.headers.cookie?.match(/session_id=([^;]+)/)?.[1] ||
+//     `session_${Date.now()}`;
+
+//   try {
+//     await mcpClient.handleQuerySSE(query, sessionId, res);
+//   } catch (err) {
+//     console.error("Error processing SSE query:", err);
+//     res.write(
+//       `data: ${JSON.stringify({ role: "error", content: String(err) })}\n\n`
+//     );
+//     res.end();
+//   }
+// });
+
+// app.get("/clear-session", (req: Request, res: Response) => {
+//   const sessionId =
+//     (req.query.session_id as string) ||
+//     req.headers.cookie?.match(/session_id=([^;]+)/)?.[1];
+
+//   if (sessionId) {
+//     const success = mcpClient.clearSession(sessionId);
+//     res.json({
+//       success,
+//       message: success ? "Session cleared" : "Session not found",
+//     });
+//   } else {
+//     res.status(400).json({ success: false, message: "Invalid session ID" });
+//   }
+// });
+
+// app.listen(PORT, async () => {
+//   console.log(`✅ Server running at http://localhost:${PORT}`);
+//   await mcpClient.connectToServers();
+// });

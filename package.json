@@ -1,0 +1,21 @@
+{
+  "type": "module",
+  "scripts": {
+    "build": "tsc && cp -R public build/ && cp -R config build/ && chmod 755 build/index.js",
+    "start": "node build/index.js",
+    "dev": "nodemon --watch . --ext ts,json,html --exec \"npm run build && node build/index.js\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "dotenv": "^16.3.1",
+    "express": "^5.0.1",
+    "openai": "^4.87.3",
+    "fs-extra": "^11.1.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "nodemon": "^3.0.0"
+  }
+}
