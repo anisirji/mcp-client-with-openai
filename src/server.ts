@@ -1,41 +1,59 @@
-import express, { Request, Response } from "express";
+import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import { MCPClient } from "./services/mcpClient.js";
-import { startSseRoutes } from "./routes/ssRoutes.js";
+import bodyParser from "body-parser";
 
-import dotenv from "dotenv";
+import { MCPService } from "./services/MCPService.js";
+import { setupApiRoutes } from "./routes/apiRoutes.js";
+import { Environment } from "./config/environment.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 
-dotenv.config();
+/**
+ * Configures and starts the Express server
+ */
+export async function startServer(): Promise<void> {
+  // Get environment configuration
+  const config = Environment.getInstance();
 
-const PORT: number = Number(process.env.PORT) || 3000;
-
-export function startServer(): void {
+  // Create Express application
   const app = express();
 
-  // Middleware for JSON
+  // Middleware for request parsing
   app.use(express.json());
+  app.use(bodyParser.json());
+  app.use(bodyParser.urlencoded({ extended: true }));
 
-  // Resolve __dirname correctly
+  // Resolve __dirname in ES modules
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
 
   // Serve static files from the public directory
   app.use(express.static(path.join(__dirname, "../public")));
 
-  // Create MCPClient instance and attach SSE routes
-  const mcpClient = new MCPClient();
-  startSseRoutes(app, mcpClient);
+  // Set up API routes
+  setupApiRoutes(app);
 
   // Default route to serve index.html
-  app.get("/", (req: Request, res: Response) => {
+  app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "../public", "index.html"));
   });
 
-  // Start the server and connect to MCP servers
-  app.listen(PORT, async () => {
-    console.log(`✅ Server running at http://localhost:${PORT}`);
-    await mcpClient.connectToServers();
-  });
+  // Error handling middleware
+  app.use(errorHandler);
+
+  // Start server and connect to MCP servers
+  try {
+    // Connect to MCP servers first
+    const mcpService = MCPService.getInstance();
+    await mcpService.connectToServers();
+
+    // Start the Express server
+    app.listen(config.port, () => {
+      console.log(`✅ Server running at http://localhost:${config.port}`);
+    });
+  } catch (error) {
+    console.error("❌ Failed to start server:", error);
+    process.exit(1);
+  }
 }

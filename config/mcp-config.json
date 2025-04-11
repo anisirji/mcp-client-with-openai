@@ -1,20 +1,25 @@
 {
-    "mcpServers": {
-        "weather": {
+    "mcpServers": [
+        {
+            "name": "weather",
+            "command": "node",
             "args": [
-                "/Users/ani/Desktop/weather/build/index.js"
-            ],
-            "env": {}
+                "/Users/ani/Desktop/MCPS/weather/build/index.js"
+            ]
         },
-        "bsc-mcp": {
+        {
+            "name": "bsc-mcp",
+            "command": "node",
             "args": [
-                "/Users/ani/Desktop/base/bsc-mcp/build/index.js"
+                "/Users/ani/Desktop/MCPS/bsc-mpc/build/index.js"
             ],
-            "env": {
-                "BSC_WALLET_PRIVATE_KEY": "",
-                "BSC_RPC_URL": "https://bsc-dataseed.binance.org",
-                "MORALIS_API_KEY": ""
+            "options": {
+                "env": {
+                    "BSC_WALLET_PRIVATE_KEY": "",
+                    "BSC_RPC_URL": "https://bsc-dataseed.binance.org",
+                    "MORALIS_API_KEY": ""
+                }
             }
         }
-    }
+    ]
 }

@@ -1,8 +1,9 @@
-import bodyParser from "body-parser"; // Just in case JSON body parsing is missing
+import bodyParser from "body-parser";
 export function startSseRoutes(app, mcpClient) {
     app.use(bodyParser.json()); // Ensure JSON body parsing
+    app.set("mcpClient", mcpClient); // Attach MCPClient to the app
     // SSE stream endpoint
-    app.get("/stream-sse", async (req, res) => {
+    app.get("/stream-sse", async (req, res, next) => {
         const query = req.query.q;
         if (!query) {
             res.status(400).send("Missing query");
@@ -20,8 +21,16 @@ export function startSseRoutes(app, mcpClient) {
             res.end();
         }
     });
+    app.post("/tool-permission", (req, res, next) => {
+        const { sessionId, granted } = req.body;
+        if (!sessionId) {
+            return res.status(400).json({ error: "Session ID is required" });
+        }
+        mcpClient.handleToolPermission(sessionId, Boolean(granted));
+        return res.status(200).json({ success: true });
+    });
     // Inject agent message into session
-    app.post("/inject-agent-message", async (req, res) => {
+    app.post("/inject-agent-message", async (req, res, next) => {
         const { session_id, message } = req.body;
         if (!session_id || !message) {
             res
@@ -46,7 +55,7 @@ export function startSseRoutes(app, mcpClient) {
         }
     });
     // Clear session
-    app.get("/clear-session", (req, res) => {
+    app.get("/clear-session", (req, res, next) => {
         const sessionId = req.query.session_id ||
             req.headers.cookie?.match(/session_id=([^;]+)/)?.[1];
         if (sessionId) {
