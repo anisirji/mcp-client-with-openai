@@ -81,7 +81,13 @@ export class ConversationController {
     const session = this.sessionManager.getOrCreateSession(sessionId);
     const tools = this.mcpService.getAllTools();
 
-    console.info("Tools inside processConversation:", tools);
+    console.info(
+      "\n\nSession:",
+      session,
+      "\nTools inside processConversation:",
+      tools,
+      "\n\n\n"
+    );
 
     // Set limit for conversation steps to prevent infinite loops
     const maxSteps = this.config.maxSteps;
@@ -94,11 +100,23 @@ export class ConversationController {
     for (let step = 0; step < maxSteps && shouldContinue; step++) {
       console.log(`[DEBUG] Conversation step ${step} (${sessionId}) started`);
 
+      console.info(
+        "\n\nSession:",
+        session,
+        "\nInside Main Reasoning Loop",
+        tools,
+        "\n\n\n"
+      );
+
       // Skip generating a new response if we're waiting for permission
       if (session.waitingForPermission) {
-        console.log("[DEBUG] Waiting for permission, exiting loop");
+        console.info("\n\nI am waiting for permission, exiting loop\n\n");
         break;
       }
+
+      console.info(
+        "\n\nGenerating a new response from the AI -- > no need of permission\n\n"
+      );
 
       // Generate a new response from the AI
       try {
@@ -186,6 +204,9 @@ export class ConversationController {
 
     const session = this.sessionManager.getOrCreateSession(sessionId);
 
+    // Track valid tool names for permission request
+    const validToolNames: string[] = [];
+
     // Process all tool calls
     for (const toolCall of toolCalls) {
       const toolName = toolCall.function.name;
@@ -219,19 +240,31 @@ export class ConversationController {
       };
 
       session.pendingToolExecutions.set(toolCall.id, pendingExecution);
+      validToolNames.push(toolName);
+    }
+
+    // If we have valid tools that need permission
+    if (validToolNames.length > 0) {
       session.waitingForPermission = true;
 
+      // Format the permission message based on number of tools
+      let permissionMessage = "";
+      if (validToolNames.length === 1) {
+        permissionMessage = `Do you want to allow execution of tool: ${validToolNames[0]}?`;
+      } else {
+        permissionMessage = `Do you want to allow execution of these tools: ${validToolNames.join(
+          ", "
+        )}?`;
+      }
+
       // Notify the client that we need permission
-      sendSSE(
-        "permission",
-        `Do you want to allow execution of tool: ${toolName}?`
-      );
+      sendSSE("permission", permissionMessage);
 
       // Return true to indicate we are waiting for permission
       return true;
     }
 
-    // If we processed all tool calls without waiting for permission,
+    // If we processed all tool calls without any valid ones,
     // we can continue the conversation
     return false;
   }
