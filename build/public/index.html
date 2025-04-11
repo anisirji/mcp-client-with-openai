@@ -255,7 +255,7 @@
         color: #6b7280;
       }
 
-      /* Add this to the CSS section, before the @media query */
+      /* Permission prompt styling */
       .permission-message {
         background-color: #fff8e6;
         border: 1px solid #ffd77a;
@@ -304,6 +304,29 @@
       .permission-status {
         font-style: italic;
         color: #6b7280;
+      }
+
+      /* Table styling for Markdown tables */
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 15px 0;
+      }
+
+      th,
+      td {
+        border: 1px solid var(--border-color);
+        padding: 8px 12px;
+        text-align: left;
+      }
+
+      th {
+        background-color: #f9f9fa;
+        font-weight: 600;
+      }
+
+      tr:nth-child(even) {
+        background-color: #f9f9fa;
       }
 
       /* Mobile adjustments */
@@ -376,14 +399,17 @@
         <button id="clear-btn" class="action-btn">New Chat</button>
       </div>
     </div>
+
     <script>
+      // Set Marked options (enables GitHub flavored Markdown including tables)
+      marked.setOptions({ gfm: true });
+
       // Get DOM elements
       const chatBox = document.getElementById("chat-box");
       const inputBox = document.getElementById("input-box");
       const sendBtn = document.getElementById("send-btn");
       const clearBtn = document.getElementById("clear-btn");
       const sessionInfo = document.getElementById("session-info");
-      // Use let instead of const if you'll be reassigning it later
       let emptyPlaceholder = document.getElementById("empty-chat-placeholder");
 
       // Utility for generating short session IDs
@@ -410,14 +436,14 @@
           emptyPlaceholder.style.display = "none";
         }
 
-        // For simple info and error messages, just set textContent
+        // For simple info and error messages, use plain text
         if (className === "info-message" || className === "error-message") {
           const msgDiv = document.createElement("div");
           msgDiv.className = className;
           msgDiv.textContent = content;
           chatBox.appendChild(msgDiv);
         } else {
-          // For user and assistant messages, display the message in a container with markdown support for the assistant
+          // For user and assistant messages, create a container with markdown support for assistant messages
           const isUser = className === "user-message";
           const containerDiv = document.createElement("div");
           containerDiv.className = `message-container ${
@@ -441,7 +467,7 @@
             // Process Markdown for assistant messages and sanitize output
             msgDiv.innerHTML = DOMPurify.sanitize(marked.parse(content));
           } else {
-            // For user messages, if you want to avoid processing markdown, you can keep plain text
+            // For user messages, simply use textContent
             msgDiv.textContent = content;
           }
 
@@ -462,14 +488,14 @@
         // Clear chat
         chatBox.innerHTML = "";
 
-        // Re-add placeholder using innerHTML
+        // Re-add placeholder
         const newEmptyPlaceholder = document.createElement("div");
         newEmptyPlaceholder.id = "empty-chat-placeholder";
         newEmptyPlaceholder.className = "empty-chat";
         newEmptyPlaceholder.innerHTML = `
-      <h3>Welcome to MCP ReAct Chat</h3>
-      <p>Type a message below to start a conversation</p>
-    `;
+          <h3>Welcome to MCP ReAct Chat</h3>
+          <p>Type a message below to start a conversation</p>
+        `;
         chatBox.appendChild(newEmptyPlaceholder);
         emptyPlaceholder = newEmptyPlaceholder;
 
@@ -504,14 +530,13 @@
 
         // Set flag to prevent duplicate sends
         isSending = true;
-
         inputBox.value = "";
         addMessage(query, "user-message");
 
         // Start the SSE connection
         startSSE(query);
 
-        // Reset the flag after a short delay
+        // Reset flag after a short delay
         setTimeout(() => {
           isSending = false;
         }, 500);
@@ -543,16 +568,16 @@
               const permissionDiv = document.createElement("div");
               permissionDiv.className = "permission-message";
               permissionDiv.innerHTML = `
-            <div class="permission-content">${content}</div>
-            <div class="permission-buttons">
-              <button class="permission-allow">Allow</button>
-              <button class="permission-deny">Deny</button>
-            </div>
-          `;
+                <div class="permission-content">${content}</div>
+                <div class="permission-buttons">
+                  <button class="permission-allow">Allow</button>
+                  <button class="permission-deny">Deny</button>
+                </div>
+              `;
               chatBox.appendChild(permissionDiv);
               chatBox.scrollTop = chatBox.scrollHeight;
 
-              // Add event listeners to permission buttons
+              // Add event listeners for permission buttons
               permissionDiv
                 .querySelector(".permission-allow")
                 .addEventListener("click", () => {

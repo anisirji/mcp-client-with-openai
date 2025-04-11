@@ -81,6 +81,8 @@ export class ConversationController {
     const session = this.sessionManager.getOrCreateSession(sessionId);
     const tools = this.mcpService.getAllTools();
 
+    console.info("Tools inside processConversation:", tools);
+
     // Set limit for conversation steps to prevent infinite loops
     const maxSteps = this.config.maxSteps;
     let shouldContinue = true;
