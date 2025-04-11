@@ -47,7 +47,18 @@ export interface Config {
 /**
  * Stream event handler function type
  */
-export type SSEMessageHandler = (role: string, content: string) => void;
+export type SSEMessageHandler = (
+  role:
+    | "assistant"
+    | "assistant-chunk"
+    | "assistant-complete"
+    | "info"
+    | "error"
+    | "tool"
+    | "tool-executing"
+    | "permission",
+  content: string
+) => void;
 
 /**
  * Session stream tracking interface

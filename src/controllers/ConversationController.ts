@@ -2,7 +2,7 @@ import { Response } from "express";
 import { MCPService } from "../services/MCPService.js";
 import { OpenAIService } from "../services/OpenAIService.js";
 import { SessionManager } from "../services/SessionManager.js";
-import { PendingToolExecution } from "../types/index.js";
+import { PendingToolExecution, SSEMessageHandler } from "../types/index.js";
 import {
   setupSSEStream,
   sendSSEError,
@@ -76,7 +76,7 @@ export class ConversationController {
    */
   private async processConversation(
     sessionId: string,
-    sendSSE: (role: string, content: string) => void
+    sendSSE: SSEMessageHandler
   ): Promise<void> {
     const session = this.sessionManager.getOrCreateSession(sessionId);
     const tools = this.mcpService.getAllTools();
@@ -118,11 +118,30 @@ export class ConversationController {
         "\n\nGenerating a new response from the AI -- > no need of permission\n\n"
       );
 
-      // Generate a new response from the AI
       try {
+        // Prepare to stream and accumulate response text
+        let streamBuffer = "";
+        let streamingOccurred = false;
+
+        // Determine if we should stream based on whether tools are likely to be used
+        // If we detect tools in the response, we'll avoid streaming for a cleaner tool execution flow
+        let shouldStream = true;
+
+        // Callback for handling streaming chunks
+        const handleStreamChunk = (chunk: string) => {
+          if (shouldStream) {
+            streamingOccurred = true;
+            streamBuffer += chunk;
+            // Send each chunk to the client for real-time streaming
+            sendSSE("assistant-chunk", chunk);
+          }
+        };
+
+        // Generate a new response from the AI with streaming callback
         const response = await this.openAIService.generateChatCompletion(
           session.messages,
-          tools.length > 0 ? tools : undefined
+          tools.length > 0 ? tools : undefined,
+          handleStreamChunk
         );
 
         // Extract the content and tool calls
@@ -137,6 +156,10 @@ export class ConversationController {
           })
         );
 
+        // If we detected tool calls during streaming, we might want to disable streaming
+        // for a cleaner tool execution flow
+        const hasTool = this.openAIService.hasToolCalls(response);
+
         // Add the assistant's response to the conversation
         const assistantMessage: ChatCompletionMessageParam = {
           role: "assistant",
@@ -147,11 +170,18 @@ export class ConversationController {
         if (toolCalls && toolCalls.length > 0) {
           assistantMessage.tool_calls = toolCalls;
         }
-
         session.messages.push(assistantMessage);
 
-        // Send the response to the client
-        sendSSE("assistant", content);
+        // If we were streaming, send the completion signal
+        if (streamingOccurred) {
+          sendSSE("assistant-complete", "");
+        }
+
+        // Only send the non-streamed full message if no streaming occurred
+        // or if we have tool calls (provides better UX for tool execution)
+        if (!streamingOccurred) {
+          sendSSE("assistant", content);
+        }
 
         // Check for response cycles to prevent infinite loops
         if (processedResponses.has(content)) {
@@ -161,14 +191,14 @@ export class ConversationController {
         processedResponses.add(content);
 
         // Check if the AI is trying to use tools
-        if (this.openAIService.hasToolCalls(response)) {
+        if (hasTool) {
           shouldContinue = await this.handleToolCalls(
             sessionId,
-            this.openAIService.extractToolCalls(response),
+            toolCalls,
             sendSSE
           );
         } else {
-          // No tool calls, we're done
+          // No tool calls, finish the conversation
           shouldContinue = false;
         }
       } catch (error) {
@@ -178,7 +208,7 @@ export class ConversationController {
           `Error: ${error instanceof Error ? error.message : String(error)}`
         );
 
-        // Add error message to the conversation
+        // Add error message to the conversation history
         session.messages.push(this.openAIService.formatErrorMessage(error));
         shouldContinue = false;
       }
@@ -195,7 +225,7 @@ export class ConversationController {
   private async handleToolCalls(
     sessionId: string,
     toolCalls: any[] | undefined,
-    sendSSE: (role: string, content: string) => void
+    sendSSE: SSEMessageHandler
   ): Promise<boolean> {
     if (!toolCalls || toolCalls.length === 0) {
       // No tool calls, don't continue the conversation

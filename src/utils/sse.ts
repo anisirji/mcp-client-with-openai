@@ -28,7 +28,7 @@ export function createSSEKeepAlive(res: Response): NodeJS.Timeout {
  * @returns Message handler function
  */
 export function createSSEMessageHandler(res: Response): SSEMessageHandler {
-  return (role: string, content: string) => {
+  return (role, content) => {
     const data = JSON.stringify({ role, content });
     res.write(`data: ${data}\n\n`);
   };
@@ -53,15 +53,17 @@ export function setupSSEStream(res: Response): ActiveStream {
 }
 
 /**
- * Send an SSE error message and end the response
+ * Send error message through SSE
  * @param res Express response object
- * @param error Error object or string
+ * @param error Error to send
  */
 export function sendSSEError(res: Response, error: unknown): void {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  res.write(
-    `data: ${JSON.stringify({ role: "error", content: errorMessage })}\n\n`
-  );
+  const data = JSON.stringify({
+    role: "error",
+    content: `Error: ${errorMessage}`,
+  });
+  res.write(`data: ${data}\n\n`);
   res.end();
 }
 

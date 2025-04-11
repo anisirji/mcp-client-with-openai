@@ -32,11 +32,13 @@ export class OpenAIService {
    * Generate a chat completion
    * @param messages Chat messages history
    * @param tools Available tools
+   * @param onChunk Optional callback for streaming chunks
    * @returns The generated completion response
    */
   public async generateChatCompletion(
     messages: ChatCompletionMessageParam[],
-    tools?: ChatCompletionTool[]
+    tools?: ChatCompletionTool[],
+    onChunk?: (chunk: string) => void
   ) {
     // Log message history for debugging
     console.log(
@@ -54,6 +56,81 @@ export class OpenAIService {
       params.tools = tools;
     }
 
+    // If streaming is requested via callback
+    if (onChunk) {
+      params.stream = true;
+
+      try {
+        const stream = await this.openai.chat.completions.create(params);
+        let fullResponse: any = {
+          choices: [{ message: { content: "", tool_calls: [] } }],
+        };
+        let accumulatedContent = "";
+        let currentToolCalls: Array<any> = [];
+
+        // Type assertion to work around TypeScript limitations with streaming
+        // The OpenAI SDK actually returns a stream even though the type doesn't reflect it
+        for await (const chunk of stream as any) {
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            accumulatedContent += content;
+            onChunk(content);
+          }
+
+          // Handle tool calls in streaming
+          if (chunk.choices[0]?.delta?.tool_calls) {
+            const toolCallsDelta = chunk.choices[0].delta.tool_calls;
+
+            for (const toolCallDelta of toolCallsDelta) {
+              if (toolCallDelta.index === undefined) continue;
+
+              // Initialize tool call at this index if it doesn't exist
+              if (!currentToolCalls[toolCallDelta.index]) {
+                currentToolCalls[toolCallDelta.index] = {
+                  id: "",
+                  type: "function",
+                  function: {
+                    name: "",
+                    arguments: "",
+                  },
+                };
+              }
+
+              // Update ID if provided
+              if (toolCallDelta.id) {
+                currentToolCalls[toolCallDelta.index].id = toolCallDelta.id;
+              }
+
+              // Update function name if provided
+              if (toolCallDelta.function?.name) {
+                currentToolCalls[toolCallDelta.index].function.name =
+                  toolCallDelta.function.name;
+              }
+
+              // Append to arguments if provided
+              if (toolCallDelta.function?.arguments) {
+                currentToolCalls[toolCallDelta.index].function.arguments +=
+                  toolCallDelta.function.arguments;
+              }
+            }
+          }
+        }
+
+        // Set the accumulated content and tool calls in the full response
+        fullResponse.choices[0].message.content = accumulatedContent;
+        if (currentToolCalls.length > 0) {
+          fullResponse.choices[0].message.tool_calls = currentToolCalls;
+        }
+
+        return fullResponse;
+      } catch (error) {
+        console.error("Error in streaming completion:", error);
+        // Fall back to non-streaming if streaming fails
+        params.stream = false;
+      }
+    }
+
+    // Non-streaming mode
     return this.openai.chat.completions.create(params);
   }
 

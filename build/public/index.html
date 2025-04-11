@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MCP ReAct Chat (SSE Version)</title>
     <style>
-      /* Claude-inspired styling */
+      /* Global style & Variables */
       @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap");
 
       :root {
@@ -31,21 +31,23 @@
       }
 
       body {
-        font-family: "Inter", system-ui, sans-serif;
-        background-color: var(--bg-color);
-        color: var(--text-color);
-        line-height: 1.5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        background-color: #f5f5f5;
         display: flex;
         flex-direction: column;
         height: 100vh;
       }
 
+      /* Top Bar */
       #top-bar {
+        background-color: #4a6fa5;
+        color: white;
+        padding: 1rem;
         display: flex;
         justify-content: space-between;
-        padding: 12px 20px;
-        border-bottom: 1px solid var(--border-color);
-        background-color: #fff;
+        align-items: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       }
 
       #title-dropdown {
@@ -60,67 +62,72 @@
         align-items: center;
         gap: 6px;
         font-weight: 500;
-        color: var(--text-color);
       }
 
+      /* Chat Container */
       #chat-container {
-        max-width: var(--max-width);
-        width: 100%;
-        margin: 0 auto;
+        flex: 1;
         display: flex;
         flex-direction: column;
-        height: calc(100vh - 45px);
-        padding: 0;
+        margin: 1rem auto;
+        max-width: 800px;
+        width: 100%;
+        background-color: var(--chat-bg);
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
       }
 
       #session-info {
         font-size: 0.85rem;
         color: var(--session-color);
         padding: 8px 20px;
-        margin-top: 4px;
+        background-color: #f0f0f0;
       }
 
       #chat-box {
         flex: 1;
         overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        scrollbar-width: thin;
-        padding: 0;
+        padding: 1rem;
       }
 
-      #chat-box::-webkit-scrollbar {
-        width: 6px;
+      .empty-chat {
+        text-align: center;
+        color: #4b5563;
+        padding: 20px;
       }
 
-      #chat-box::-webkit-scrollbar-track {
-        background: transparent;
+      .empty-chat h3 {
+        margin-bottom: 10px;
+        font-size: 1.2rem;
+        font-weight: 600;
       }
 
-      #chat-box::-webkit-scrollbar-thumb {
-        background-color: #d1d5db;
-        border-radius: 10px;
-      }
-
+      /* Message Containers & Styles */
       .message-container {
         display: flex;
         flex-direction: column;
-        padding: 20px;
-        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 1rem;
       }
 
       .user-container {
-        background-color: var(--user-bg);
+        align-self: flex-end;
+        background-color: #e1f0fc;
+        border-radius: var(--border-radius);
+        padding: 8px;
       }
 
       .assistant-container {
-        background-color: var(--assistant-bg);
+        align-self: flex-start;
+        background-color: #f0f0f0;
+        border-radius: var(--border-radius);
+        padding: 8px;
       }
 
       .message-header {
         display: flex;
         align-items: center;
-        margin-bottom: 12px;
+        margin-bottom: 0.5rem;
       }
 
       .avatar {
@@ -151,200 +158,130 @@
         margin-left: 38px;
       }
 
-      .info-message {
-        font-style: italic;
-        color: #4b5563;
-        align-self: center;
+      /* Info & Error Messages */
+      .info-message,
+      .error-message {
         text-align: center;
         margin: 10px 0;
         padding: 0 20px;
       }
 
       .error-message {
-        color: #b91c1c;
-        align-self: flex-start;
-        padding: 0 20px;
+        color: var(--danger);
       }
 
-      .bottom-area {
-        padding: 24px 20px;
-        border-top: 1px solid var(--border-color);
-        background-color: #fff;
-      }
-
-      #input-area {
-        position: relative;
-        max-width: var(--max-width);
-        margin: 0 auto;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-
-      #input-box {
-        flex: 1;
-        padding: 14px 16px;
-        font-size: 1rem;
-        border-radius: var(--border-radius);
-        border: 1px solid var(--border-color);
-        outline: none;
-        transition: all 0.2s ease;
-        font-family: inherit;
-      }
-
-      #input-box:focus {
-        border-color: var(--primary);
-        box-shadow: 0 0 0 1px var(--primary);
-      }
-
-      #input-box::placeholder {
-        color: #9ca3af;
-      }
-
-      .action-btn {
-        height: 44px;
-        border: none;
-        border-radius: var(--border-radius);
-        cursor: pointer;
-        font-weight: 500;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 16px;
-      }
-
-      #send-btn {
-        background-color: var(--primary);
-        color: white;
-      }
-
-      #send-btn:hover {
-        background-color: var(--primary-hover);
-      }
-
-      #clear-btn {
-        background-color: #f3f4f6;
-        color: #4b5563;
-      }
-
-      #clear-btn:hover {
-        background-color: #e5e7eb;
-      }
-
-      .empty-chat {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        color: #4b5563;
-        text-align: center;
-        padding: 20px;
-      }
-
-      .empty-chat h3 {
-        margin-bottom: 10px;
-        font-size: 1.2rem;
-        font-weight: 600;
-      }
-
-      .empty-chat p {
-        max-width: 400px;
-        margin-bottom: 20px;
-        color: #6b7280;
-      }
-
-      /* Permission prompt styling */
+      /* Permission Prompt */
       .permission-message {
-        background-color: #fff8e6;
+        background-color: #fff8e1;
         border: 1px solid #ffd77a;
         border-radius: 8px;
         margin: 10px 20px;
         padding: 15px;
-      }
-
-      .permission-content {
-        margin-bottom: 12px;
-        font-weight: 500;
+        text-align: center;
       }
 
       .permission-buttons {
         display: flex;
+        justify-content: center;
         gap: 10px;
-      }
-
-      .permission-allow,
-      .permission-deny {
-        padding: 8px 16px;
-        border-radius: 4px;
-        border: none;
-        font-weight: 500;
-        cursor: pointer;
-      }
-
-      .permission-allow {
-        background-color: var(--primary);
-        color: white;
-      }
-
-      .permission-allow:hover {
-        background-color: var(--primary-hover);
-      }
-
-      .permission-deny {
-        background-color: #f3f4f6;
-        color: #4b5563;
-      }
-
-      .permission-deny:hover {
-        background-color: #e5e7eb;
       }
 
       .permission-status {
         font-style: italic;
-        color: #6b7280;
+        margin-top: 5px;
       }
 
-      /* Table styling for Markdown tables */
+      /* Tool Message */
+      .tool-message {
+        background-color: #e8eaf6;
+        border-left: 3px solid #3f51b5;
+        font-family: monospace;
+        white-space: pre-wrap;
+        margin: 10px 20px;
+        padding: 15px;
+        border-radius: 8px;
+      }
+
+      /* Streaming Cursor Animation */
+      .assistant-message.streaming {
+        border-right: 2px solid #4a6fa5;
+        position: relative;
+      }
+      .assistant-message.streaming::after {
+        content: "";
+        display: inline-block;
+        width: 2px;
+        height: 1.2em;
+        background-color: #4a6fa5;
+        margin-left: 2px;
+        vertical-align: middle;
+      }
+
+      /* Markdown Table Styling */
       table {
         border-collapse: collapse;
         width: 100%;
         margin: 15px 0;
       }
-
       th,
       td {
         border: 1px solid var(--border-color);
         padding: 8px 12px;
         text-align: left;
       }
-
       th {
         background-color: #f9f9fa;
         font-weight: 600;
       }
-
       tr:nth-child(even) {
         background-color: #f9f9fa;
       }
 
-      /* Mobile adjustments */
+      /* Bottom/Input Area */
+      .bottom-area {
+        padding: 1rem;
+        background-color: #f0f0f0;
+        border-top: 1px solid #ddd;
+      }
+      #input-area {
+        display: flex;
+        gap: 0.5rem;
+      }
+      #input-box {
+        flex: 1;
+        padding: 0.75rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 14px;
+      }
+      .action-btn {
+        padding: 0 1rem;
+        background-color: #4a6fa5;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: bold;
+      }
+      .action-btn:hover {
+        background-color: #3d5d8a;
+      }
+
+      /* Mobile Adjustments */
       @media (max-width: 768px) {
         #chat-container {
-          height: calc(100vh - 45px);
-        }
-
-        .bottom-area {
-          padding: 16px;
+          margin: 0 1rem;
         }
       }
     </style>
-    <!-- Include Marked (for Markdown parsing) and DOMPurify (for sanitizing output) -->
+
+    <!-- Include Marked (for Markdown parsing) & DOMPurify (for sanitizing) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
   </head>
   <body>
+    <!-- Top Bar -->
     <div id="top-bar">
       <div id="title-dropdown">
         Introducing Claude, the AI Assistant
@@ -401,10 +338,10 @@
     </div>
 
     <script>
-      // Set Marked options (enables GitHub flavored Markdown including tables)
+      // Enable GitHub-Flavored Markdown
       marked.setOptions({ gfm: true });
 
-      // Get DOM elements
+      // DOM references
       const chatBox = document.getElementById("chat-box");
       const inputBox = document.getElementById("input-box");
       const sendBtn = document.getElementById("send-btn");
@@ -412,7 +349,7 @@
       const sessionInfo = document.getElementById("session-info");
       let emptyPlaceholder = document.getElementById("empty-chat-placeholder");
 
-      // Utility for generating short session IDs
+      // Generate or retrieve a session ID
       function generateShortId(length = 8) {
         const chars =
           "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -422,7 +359,6 @@
         ).join("");
       }
 
-      // Retrieve or create session ID
       let sessionId = localStorage.getItem("mcp_session_id");
       if (!sessionId) {
         sessionId = generateShortId();
@@ -430,20 +366,18 @@
       }
       sessionInfo.textContent = `Session ID: ${sessionId}`;
 
-      // Helper function to add a message to the chat
+      // Add a message to the chat UI
       function addMessage(content, className = "assistant-message") {
         if (emptyPlaceholder) {
           emptyPlaceholder.style.display = "none";
         }
 
-        // For simple info and error messages, use plain text
         if (className === "info-message" || className === "error-message") {
           const msgDiv = document.createElement("div");
           msgDiv.className = className;
           msgDiv.textContent = content;
           chatBox.appendChild(msgDiv);
         } else {
-          // For user and assistant messages, create a container with markdown support for assistant messages
           const isUser = className === "user-message";
           const containerDiv = document.createElement("div");
           containerDiv.className = `message-container ${
@@ -464,10 +398,9 @@
           const msgDiv = document.createElement("div");
           msgDiv.className = "chat-message";
           if (!isUser) {
-            // Process Markdown for assistant messages and sanitize output
+            // For assistant, parse as Markdown + sanitize
             msgDiv.innerHTML = DOMPurify.sanitize(marked.parse(content));
           } else {
-            // For user messages, simply use textContent
             msgDiv.textContent = content;
           }
 
@@ -475,7 +408,6 @@
           containerDiv.appendChild(msgDiv);
           chatBox.appendChild(containerDiv);
         }
-
         chatBox.scrollTop = chatBox.scrollHeight;
       }
 
@@ -485,10 +417,7 @@
         localStorage.setItem("mcp_session_id", sessionId);
         sessionInfo.textContent = `Session ID: ${sessionId}`;
 
-        // Clear chat
         chatBox.innerHTML = "";
-
-        // Re-add placeholder
         const newEmptyPlaceholder = document.createElement("div");
         newEmptyPlaceholder.id = "empty-chat-placeholder";
         newEmptyPlaceholder.className = "empty-chat";
@@ -506,17 +435,12 @@
         }
       });
 
-      // Flag to prevent duplicate message sending
       let isSending = false;
 
-      // Handle send button
+      // Handle send button and Enter key
       sendBtn.addEventListener("click", () => {
-        if (!isSending) {
-          sendMessage();
-        }
+        if (!isSending) sendMessage();
       });
-
-      // Handle Enter key
       inputBox.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !isSending) {
           e.preventDefault();
@@ -524,24 +448,20 @@
         }
       });
 
+      // Send user message
       function sendMessage() {
         const query = inputBox.value.trim();
         if (!query) return;
-
-        // Set flag to prevent duplicate sends
         isSending = true;
         inputBox.value = "";
         addMessage(query, "user-message");
-
-        // Start the SSE connection
         startSSE(query);
-
-        // Reset flag after a short delay
         setTimeout(() => {
           isSending = false;
         }, 500);
       }
 
+      // SSE with chunked Markdown
       function startSSE(query) {
         if (window.currentSSE) window.currentSSE.close();
 
@@ -551,20 +471,76 @@
         const eventSource = new EventSource(url);
         window.currentSSE = eventSource;
 
+        let assistantBuffer = "";
+        let chunkContainer = null; // We'll store the container of this streaming message
+        let streamingMessageDiv = null; // The actual .chat-message div
+
         eventSource.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
             const role = data.role;
             const content = data.content;
 
-            if (role === "assistant") {
-              addMessage(content, "assistant-message");
+            if (role === "assistant-chunk") {
+              // Accumulate chunks in a buffer
+              assistantBuffer += content;
+
+              // If we haven't created a container yet, do so now
+              if (!chunkContainer) {
+                chunkContainer = document.createElement("div");
+                chunkContainer.className =
+                  "message-container assistant-container";
+
+                // Add header with avatar
+                const headerDiv = document.createElement("div");
+                headerDiv.className = "message-header";
+                const avatarDiv = document.createElement("div");
+                avatarDiv.className = "avatar assistant-avatar";
+                avatarDiv.textContent = "AI";
+                headerDiv.appendChild(avatarDiv);
+                chunkContainer.appendChild(headerDiv);
+
+                // The chat-message div that holds text
+                streamingMessageDiv = document.createElement("div");
+                // Give it the blinking-cursor style
+                streamingMessageDiv.className =
+                  "chat-message assistant-message streaming";
+
+                chunkContainer.appendChild(streamingMessageDiv);
+                chatBox.appendChild(chunkContainer);
+              }
+
+              // Now parse the entire buffer each time
+              streamingMessageDiv.innerHTML = DOMPurify.sanitize(
+                marked.parse(assistantBuffer)
+              );
+              chatBox.scrollTop = chatBox.scrollHeight;
+            } else if (role === "assistant-complete") {
+              // End of streaming: remove blinking
+              if (streamingMessageDiv) {
+                streamingMessageDiv.classList.remove("streaming");
+              }
+              assistantBuffer = "";
+              chunkContainer = null;
+              streamingMessageDiv = null;
+            } else if (role === "assistant") {
+              // If no chunking happened, just add a full assistant message
+              // If chunking did happen, skip to avoid duplication
+              if (!chunkContainer) {
+                addMessage(content, "assistant-message");
+              }
+              assistantBuffer = "";
+              chunkContainer = null;
+              streamingMessageDiv = null;
             } else if (role === "info") {
               addMessage(content, "info-message");
             } else if (role === "error") {
               addMessage(content, "error-message");
+              assistantBuffer = "";
+              chunkContainer = null;
+              streamingMessageDiv = null;
             } else if (role === "permission") {
-              // Create a permission prompt UI
+              // Show permission prompt
               const permissionDiv = document.createElement("div");
               permissionDiv.className = "permission-message";
               permissionDiv.innerHTML = `
@@ -577,7 +553,6 @@
               chatBox.appendChild(permissionDiv);
               chatBox.scrollTop = chatBox.scrollHeight;
 
-              // Add event listeners for permission buttons
               permissionDiv
                 .querySelector(".permission-allow")
                 .addEventListener("click", () => {
@@ -585,7 +560,6 @@
                   permissionDiv.querySelector(".permission-buttons").innerHTML =
                     '<div class="permission-status">Allowed</div>';
                 });
-
               permissionDiv
                 .querySelector(".permission-deny")
                 .addEventListener("click", () => {
@@ -593,6 +567,12 @@
                   permissionDiv.querySelector(".permission-buttons").innerHTML =
                     '<div class="permission-status">Denied</div>';
                 });
+
+              assistantBuffer = "";
+              chunkContainer = null;
+              streamingMessageDiv = null;
+            } else if (role === "tool" || role === "tool-executing") {
+              addMessage(content, "tool-message");
             }
           } catch (err) {
             console.error("Failed to parse SSE data:", event.data);
@@ -605,17 +585,12 @@
         };
       }
 
-      // Function to handle permission response
+      // Handle permission responses
       function handlePermissionResponse(granted) {
         fetch("/tool-permission", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            sessionId: sessionId,
-            granted: granted,
-          }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, granted }),
         }).catch((error) => {
           console.error("Error sending permission response:", error);
         });
