@@ -11,13 +11,13 @@
             "name": "bsc-mcp",
             "command": "node",
             "args": [
-                "/Users/ani/Desktop/MCPS/bsc-mpc/build/index.js"
+                "/Users/ani/Desktop/MCPS/bsc-mcp/build/index.js"
             ],
             "options": {
                 "env": {
-                    "BSC_WALLET_PRIVATE_KEY": "",
-                    "BSC_RPC_URL": "https://bsc-dataseed.binance.org",
-                    "MORALIS_API_KEY": ""
+                    "BSC_WALLET_PRIVATE_KEY": "JDJiJDEyJEZHSFIxWi4uVUJTMjlBVXkvU3hzNU+YS92X8JeOK3H+FOQG2QU1vgfJqAn+sq1fcjaaOarRcJsnis1hpKUpJtQQipmU2Jc0QiGumvsnSoeGq6PUHkwHDt5jti5eoOGyrygO/YboYr1vL6wf3+FH/VtLl0V8",
+                    "BSC_WALLET_ADDRESS": "0xCdEf366e16397e91EaDA1D93397C35590C3de8Ac",
+                    "BSC_RPC_URL": "https://bsc-dataseed.binance.org"
                 }
             }
         }

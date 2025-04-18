@@ -1,0 +1,651 @@
+# MCP Client TypeScript Project Overview
+
+## Project Structure
+```
+/
+├── .git/
+├── .gitignore
+├── .example.env
+├── build/
+├── package.json
+├── README.md
+├── index.ts
+├── src/
+│   ├── routes/
+│   │   └── apiRoutes.ts
+│   ├── services/
+│   │   ├── MCPService.ts
+│   │   ├── OpenAIService.ts
+│   │   └── SessionManager.ts
+│   ├── server.ts
+│   ├── middleware/
+│   │   └── errorHandler.ts
+│   ├── controllers/
+│   │   └── ConversationController.ts
+│   ├── utils/
+│   │   ├── sse.ts
+│   │   └── helpers.ts
+│   ├── config/
+│   │   └── environment.ts
+│   └── types/
+│       └── index.ts
+├── testenv.txt
+├── node_modules/
+├── package-lock.json
+├── .DS_Store
+├── oldcode.txt
+├── config/
+├── .env
+├── text.json
+├── public/
+│   └── index.html
+└── tsconfig.json
+```
+
+## Configuration & Dependencies
+
+### package.json
+```json
+{
+  "type": "module",
+  "scripts": {
+    "build": "tsc && cp -R public build/ && cp -R config build/ && cp -R .env* build/ 2>/dev/null || : && chmod 755 build/index.js",
+    "start": "node build/index.js",
+    "dev": "nodemon --watch . --ext ts,json,html,env --exec \"npm run build && node build/index.js\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "dotenv": "^16.3.1",
+    "express": "^5.0.1",
+    "openai": "^4.87.3",
+    "fs-extra": "^11.1.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "nodemon": "^3.0.0"
+  }
+}
+```
+
+### tsconfig.json
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "outDir": "./build",
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "build"]
+}
+```
+
+## Main Application Files
+
+### index.ts
+```typescript
+import { startServer } from "./src/server.js"; // Adjust the path accordingly
+
+// Start the server and handle errors
+startServer().catch((error) => {
+  console.error("Failed to start server:", error);
+  process.exit(1);
+});
+```
+
+### src/server.ts
+```typescript
+import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+import bodyParser from "body-parser";
+
+import { MCPService } from "./services/MCPService.js";
+import { setupApiRoutes } from "./routes/apiRoutes.js";
+import { Environment } from "./config/environment.js";
+import { errorHandler } from "./middleware/errorHandler.js";
+
+/**
+ * Configures and starts the Express server
+ */
+export async function startServer(): Promise<void> {
+  // Get environment configuration
+  const config = Environment.getInstance();
+
+  // Create Express application
+  const app = express();
+
+  // Middleware for request parsing
+  app.use(express.json());
+  app.use(bodyParser.json());
+  app.use(bodyParser.urlencoded({ extended: true }));
+
+  // Resolve __dirname in ES modules
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+
+  // Serve static files from the public directory
+  app.use(express.static(path.join(__dirname, "../public")));
+
+  // Set up API routes
+  setupApiRoutes(app);
+
+  // Default route to serve index.html
+  app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "../public", "index.html"));
+  });
+
+  // Error handling middleware
+  app.use(errorHandler);
+
+  // Start server and connect to MCP servers
+  try {
+    // Connect to MCP servers first
+    const mcpService = MCPService.getInstance();
+    await mcpService.connectToServers();
+
+    // Start the Express server
+    app.listen(config.port, () => {
+      console.log(`✅ Server running at http://localhost:${config.port}`);
+    });
+  } catch (error) {
+    console.error("❌ Failed to start server:", error);
+    process.exit(1);
+  }
+}
+```
+
+### src/routes/apiRoutes.ts
+```typescript
+import express, { Request, Response, NextFunction } from "express";
+import { ConversationController } from "../controllers/ConversationController.js";
+import { extractSessionId } from "../utils/helpers.js";
+import { sendSSEError } from "../utils/sse.js";
+
+/**
+ * Creates and configures API routes for the application
+ * @param app Express application instance
+ */
+export function setupApiRoutes(app: express.Application): void {
+  const router = express.Router();
+  const conversationController = ConversationController.getInstance();
+
+  // SSE stream endpoint for real-time chat - keep at root level for backward compatibility
+  app.get(
+    "/stream-sse",
+    async (req: Request, res: Response, next: NextFunction) => {
+      const query = req.query.q as string;
+
+      if (!query) {
+        res.status(400).send("Missing query parameter");
+        return;
+      }
+
+      // Extract or generate session ID
+      const sessionId = extractSessionId(
+        req.query.session_id as string,
+        req.headers.cookie
+      );
+
+      try {
+        await conversationController.handleQuerySSE(query, sessionId, res);
+      } catch (err) {
+        console.error("Error processing SSE query:", err);
+        sendSSEError(res, err);
+      }
+    }
+  );
+
+  // Tool permission endpoint - keep at root level for backward compatibility
+  app.post(
+    "/tool-permission",
+    (req: Request, res: Response, next: NextFunction) => {
+      const { sessionId, granted } = req.body;
+
+      if (!sessionId) {
+        res.status(400).json({ error: "Session ID is required" });
+        return;
+      }
+
+      try {
+        conversationController.handleToolPermission(
+          sessionId,
+          Boolean(granted)
+        );
+        res.status(200).json({ success: true });
+      } catch (error) {
+        console.error("Error handling tool permission:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  );
+
+  // Clear session endpoint - keep at root level for backward compatibility
+  app.get(
+    "/clear-session",
+    (req: Request, res: Response, next: NextFunction) => {
+      const sessionId = extractSessionId(
+        req.query.session_id as string,
+        req.headers.cookie
+      );
+
+      try {
+        const success = conversationController.clearSession(sessionId);
+
+        res.json({
+          success,
+          message: success ? "Session cleared" : "Session not found",
+        });
+      } catch (error) {
+        console.error("Error clearing session:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  );
+
+  // Add these routes to the /api prefix as well for forward compatibility
+
+  // Inject message endpoint
+  router.post(
+    "/inject-message",
+    async (req: Request, res: Response, next: NextFunction) => {
+      const { session_id, message } = req.body;
+
+      if (!session_id || !message) {
+        res.status(400).json({
+          success: false,
+          message: "Missing session_id or message",
+        });
+        return;
+      }
+
+      try {
+        const injected = conversationController.injectAssistantMessage(
+          session_id,
+          message
+        );
+
+        if (injected) {
+          const pushed = conversationController.pushMessageToClient(
+            session_id,
+            "assistant",
+            message
+          );
+
+          res.json({
+            success: true,
+            injected,
+            pushed,
+            message: pushed
+              ? "Message injected and pushed to frontend in real-time."
+              : "Message injected, but no active SSE connection found.",
+          });
+        } else {
+          res
+            .status(404)
+            .json({ success: false, message: "Session not found" });
+        }
+      } catch (error) {
+        console.error("Error injecting message:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  );
+
+  // Register the router with the /api prefix for future endpoints
+  app.use("/api", router);
+}
+```
+
+### src/services/MCPService.ts (partial)
+```typescript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// import { SseClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { ChatCompletionTool } from "openai/resources/chat/completions";
+import { Environment } from "../config/environment.js";
+import {
+  MCPServerConfig,
+  MCPRequest,
+  MCPToolResponse,
+  MCPExecuteResponse,
+} from "../types/index.js";
+
+/**
+ * Service for managing Model Context Protocol (MCP) connections
+ */
+export class MCPService {
+  private static instance: MCPService;
+  private env = Environment.getInstance();
+
+  private mcpInstances: Record<string, Client> = {};
+  private tools: Record<string, ChatCompletionTool[]> = {};
+
+  private constructor() {}
+
+  /**
+   * Get singleton instance
+   */
+  public static getInstance(): MCPService {
+    if (!MCPService.instance) {
+      MCPService.instance = new MCPService();
+    }
+    return MCPService.instance;
+  }
+
+  /**
+   * Connect to all configured MCP servers
+   */
+  public async connectToServers(): Promise<void> {
+    const connectionPromises = this.env.mcpServers.map((serverConfig) =>
+      this.connectToServer(serverConfig)
+    );
+
+    try {
+      await Promise.all(connectionPromises);
+      console.log("✅ Connected to all MCP servers successfully");
+    } catch (error) {
+      console.error("❌ Failed to connect to some MCP servers:", error);
+      // Continue even if some servers fail to connect
+    }
+  }
+
+  /**
+   * Connect to a specific MCP server
+   * @param serverConfig Server configuration
+   */
+  private async connectToServer(serverConfig: MCPServerConfig): Promise<void> {
+    try {
+      // Create transport with options
+      const transportConfig: any = {
+        // Use process.execPath instead of serverConfig.command to ensure we use the correct Node executable
+        command: process.execPath,
+        args: serverConfig.args || [],
+      };
+
+      // Add environment variables if present in options
+      if (serverConfig.options?.env) {
+        transportConfig.env = Object.fromEntries(
+          Object.entries(serverConfig.options.env).filter(
+            ([, value]) => value !== undefined
+          ) as [string, string][]
+        );
+      }
+
+      // Add any other options
+      if (serverConfig.options) {
+        const { env, ...otherOptions } = serverConfig.options;
+        Object.assign(transportConfig, otherOptions);
+      }
+
+      console.log(`Connecting to MCP server: ${serverConfig.name}`);
+
+      // Create transport
+      const transport = new StdioClientTransport(transportConfig);
+
+      // Initialize client with transport
+      const client = new Client({
+        name: serverConfig.name,
+        version: "1.0.0",
+      });
+
+      // Connect the client with transport
+      await client.connect(transport);
+
+      const serverName =
+        serverConfig.name ||
+        `server_${Object.keys(this.mcpInstances).length + 1}`;
+      this.mcpInstances[serverName] = client;
+
+      // Try different methods to get tools
+      try {
+        await this.discoverTools(client, serverName);
+      } catch (toolError) {
+        console.warn(`Error discovering tools from ${serverName}:`, toolError);
+        console.warn(`Will proceed with empty tool list for ${serverName}`);
+        // Initialize with empty tool list instead of failing
+        this.tools[serverName] = [];
+      }
+
+      console.log(`Successfully connected to MCP server: ${serverName}`);
+    } catch (error) {
+      console.error(
+        `Failed to connect to MCP server: ${serverConfig.name}`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Try different methods to discover tools from a server
+   * @param client The MCP client
+   * @param serverName The server name
+   */
+  private async discoverTools(
+    client: Client,
+    serverName: string
+  ): Promise<void> {
+    // Try direct method first (from SDK)
+    try {
+      console.log(
+        `Attempting to discover tools from ${serverName} using SDK methods`
+      );
+      const toolsResult = await client.listTools();
+
+      if (toolsResult && toolsResult.tools) {
+        this.tools[serverName] = toolsResult.tools.map((tool) => ({
+          type: "function" as const,
+          function: {
+            name: tool.name,
+            description: tool.description ?? "",
+            parameters: tool.inputSchema,
+          },
+        }));
+
+        console.log(
+          `Discovered ${this.tools[serverName].length} tools from MCP server: ${serverName}`
+        );
+        return;
+      }
+    } catch (error) {
+      console.warn(
+        `Standard listTools method failed for ${serverName}, trying alternatives`
+      );
+    }
+
+    // First fallback: try using request with listTools method
+    try {
+      console.log(`Trying alternative discovery method for ${serverName}`);
+      const listToolsRequest: MCPRequest = {
+        method: "listTools",
+      };
+
+      const toolsResponse = (await (client as any).request(
+        listToolsRequest
+      )) as MCPToolResponse;
+
+      if (toolsResponse.status === "success" && toolsResponse.tools) {
+        this.processToolsResponse(toolsResponse, serverName);
+        return;
+      }
+    } catch (error) {
+      console.warn(`Alternative listTools method failed for ${serverName}`);
+    }
+
+    // Second fallback: try with getTools
+    try {
+      const getToolsRequest: MCPRequest = {
+        method: "getTools",
+      };
+
+      const toolsResponse = (await (client as any).request(
+        getToolsRequest
+      )) as MCPToolResponse;
+
+      if (toolsResponse.status === "success" && toolsResponse.tools) {
+        this.processToolsResponse(toolsResponse, serverName);
+        return;
+      }
+    } catch (error) {
+      console.warn(`Alternative getTools method failed for ${serverName}`);
+    }
+
+    // If we get here, no tool discovery method worked
+    this.tools[serverName] = [];
+    console.warn(`No tools discovered for ${serverName}`);
+  }
+
+  /**
+   * Process a tools response and format the tools
+   * @param toolsResponse The tools response from the server
+   * @param serverName The server name
+   */
+  private processToolsResponse(
+    toolsResponse: MCPToolResponse,
+    serverName: string
+  ): void {
+    // Ensure tools exist
+    if (!toolsResponse.tools || toolsResponse.tools.length === 0) {
+      this.tools[serverName] = [];
+      console.log(`No tools available from MCP server: ${serverName}`);
+      return;
+    }
+
+    // Convert the tools to the expected format with proper typing
+    const formattedTools: ChatCompletionTool[] = toolsResponse.tools.map(
+      (tool) => ({
+        type: "function" as const,
+        function: {
+          name: tool.name,
+          description: tool.description || "",
+          parameters: (tool as any).inputSchema || tool.parameters || {}, // Try inputSchema first, then fall back to parameters
+        },
+      })
+    );
+
+    this.tools[serverName] = formattedTools;
+    console.log(
+      `Discovered ${formattedTools.length} tools from MCP server: ${serverName}`
+    );
+  }
+
+  /**
+   * Execute a tool on an MCP server
+   * @param serverName Name of the server
+   * @param toolName Name of the tool to execute
+   * @param args Arguments for the tool
+   * @returns Result of tool execution
+   */
+  public async executeTool(
+    serverName: string,
+    toolName: string,
+    args: Record<string, unknown>
+  ): Promise<string> {
+    // Implementation details omitted for brevity
+    // This method executes a specified tool on the MCP server
+  }
+
+  /**
+   * Get all tools from all connected MCP servers
+   * @returns Array of all available tools
+   */
+  public getAllTools(): ChatCompletionTool[] {
+    // Implementation for returning all tools from all servers
+  }
+
+  /**
+   * Get human-readable tool descriptions
+   * @returns String containing all tool names and descriptions
+   */
+  public getToolDescriptions(): string {
+    // Implementation for getting human-readable tool descriptions
+  }
+
+  /**
+   * Find which server can execute a given tool
+   * @param toolName Name of the tool
+   * @returns Name of the server, or null if not found
+   */
+  public findServerForTool(toolName: string): string | null {
+    // Implementation for finding which server can execute a given tool
+  }
+}
+```
+
+### src/middleware/errorHandler.ts
+```typescript
+import { Request, Response, NextFunction } from "express";
+
+/**
+ * Custom error type with status code
+ */
+interface AppError extends Error {
+  statusCode?: number;
+}
+
+/**
+ * Global error handling middleware
+ * @param err Error object
+ * @param req Express request
+ * @param res Express response
+ * @param next Express next function
+ */
+export function errorHandler(
+  err: AppError,
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  // Log error for debugging
+  console.error("Error caught by error handler:", err);
+
+  // Set default status code if not provided
+  const statusCode = err.statusCode || 500;
+
+  // Send error response
+  res.status(statusCode).json({
+    success: false,
+    error: {
+      message: err.message || "An unexpected error occurred",
+      statusCode,
+    },
+  });
+}
+```
+
+## Project Summary
+
+This project is a TypeScript server application that implements the Model Context Protocol (MCP) client, allowing interaction with various AI language models through a standardized interface. Here are the key components:
+
+1. **Express Server**: The application is built on Express.js, providing API endpoints for client applications to communicate with MCP servers.
+
+2. **MCP Integration**: The `MCPService` class manages connections to MCP servers, discovering available tools and providing an interface to execute tools through the MCP protocol.
+
+3. **Session Management**: The application handles conversations with AI models persistently through session management.
+
+4. **Real-time Communication**: Server-Sent Events (SSE) are used to stream AI responses to clients in real-time.
+
+5. **OpenAI Integration**: The project includes integration with OpenAI's API for AI model interactions.
+
+The codebase follows a modular architecture with separate controllers, services, utilities, and middleware components. It uses TypeScript for type safety and follows modern JavaScript practices with ES modules.
+
+The server can be started using `npm run dev` for development or `npm run build && npm start` for production. 

@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// import { SseClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { ChatCompletionTool } from "openai/resources/chat/completions";
 import { Environment } from "../config/environment.js";
 import {
